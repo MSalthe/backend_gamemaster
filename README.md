@@ -8,3 +8,10 @@ Handles incoming connections asynchronously. Has getters and setters, use them. 
 main.py:
 Should spawn all relevant routines and threads. 
 Don't make a mess of it, save your modules as separate .py files, import them in main and run your program's main routine as a asyncio coroutine or a thread.
+
+
+Relevant repos:
+
+Front end example: https://github.com/MSalthe/web_gruppe4_elsys2
+
+Client code (not up to date with current client handler): https://github.com/MSalthe/sokkelkode

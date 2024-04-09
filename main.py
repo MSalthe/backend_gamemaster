@@ -27,6 +27,7 @@ async def main():
     #
     #
 
+    print("Test")
     # Start new backend thread here to handle communication with front end. 
     # Only global variables and a main routine! Don't put any other code here pls. Keep main() clean.
     # Run it as a separate thread so that it runs concurrently with the Game Master.

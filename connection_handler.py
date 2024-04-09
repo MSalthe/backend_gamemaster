@@ -3,6 +3,7 @@
 import asyncio
 import random
 import json
+import time
 from enum import Enum
 
 debug = True # Set to True to enable debug messages
@@ -82,10 +83,18 @@ class connection_handler:
         print(f"New client added: {writer.get_extra_info('peername')}")
         
         writer.write(("set_id " + str(my_id)).encode())
+        await writer.drain()
+
+        await asyncio.sleep(0.1)
+
+        writer.write(("set_session_id " + str(session_id)).encode())
+        await writer.drain()
         
         return my_id
     
     async def _request_id(self, reader, writer):
+        await asyncio.sleep(0.1)
+
         writer.write("request_id".encode())
         await writer.drain()
         data = await reader.read(32)
@@ -93,12 +102,22 @@ class connection_handler:
         if debug: print(f"Received id reply: {message}")
         
         # ID reply: "new_id" or "session_id, client_id"
-        if message == "new_id":
+        if message.strip() == "new_id":
             return message
         else:
-            session_id_reply, client_id_reply = message.split(", ")
-            if int(session_id_reply) != session_id:
-                print("Session ID mismatch. Assigning new ID.")
+            try:
+                session_id_reply, client_id_reply = message.split(", ")
+            except:
+                print("Invalid reply during handshake: " + message)
+                return "invalid_reply"
+            
+            try:
+                if int(session_id_reply) != session_id:
+                    print("Session ID mismatch. Assigning new ID.")
+                    print(f"Session ID: {session_id}, Received session ID: {session_id_reply}")
+                    return "new_id"
+            except:
+                print("Invalid session ID reply: " + session_id_reply)
                 return "new_id"
 
         return int(client_id_reply)
@@ -108,33 +127,32 @@ class connection_handler:
 
         #asyncio.sleep(1) # Wait for client to initialize.
         id_reply = await self._request_id(reader, writer)
+        if debug: print(f"ID reply: {id_reply}")
 
-        handshake_complete = False
-        while not handshake_complete:
-            if id_reply == "new_id": # New client
-                my_id = await self._create_client(reader, writer) # Also sends ID to client
-                if self._request_id(reader, writer) == my_id:
-                    handshake_complete = True
-
-            else:                   # Reconnecting client
-                try:
-                    if int(id_reply) in self._dropped_clients:
-                        my_id = int(id_reply)
-                        self._clients["client_" + str(my_id)].reader = reader
-                        self._clients["client_" + str(my_id)].writer = writer
-                        print(f"Client reconnected: " + my_id)
-                        handshake_complete = True
-                    else:
-                        print("Client ID not found. Assigning new ID.")
-                        my_id = await self._create_client(reader, writer)
-                        if self._request_id(reader, writer) == my_id:
-                            handshake_complete = True
-                except:
-                    print("Invalid reply during handshake: " + id_reply)
-                    # Will retry handshake
+        if id_reply.strip() == "new_id": # New client
+            if debug: print("New client detected.")
+            my_id = await self._create_client(reader, writer) # Also sends ID to client
+            if await self._request_id(reader, writer) == my_id:
+                return my_id
+            
+        else:                            # Reconnecting client
+            try:
+                if int(id_reply) in self._dropped_clients:
+                    my_id = int(id_reply)
+                    self._clients["client_" + str(my_id)].reader = reader
+                    self._clients["client_" + str(my_id)].writer = writer
+                    print(f"Client reconnected: " + my_id)
+                    return my_id
+                else:
+                    print("Client ID not found. Assigning new ID.")
+                    my_id = await self._create_client(reader, writer)
+                    if self._request_id(reader, writer) == my_id:
+                        return my_id
+            except:
+                print("Invalid reply during handshake: " + id_reply)
+            
+        return -1
         
-        return my_id
-
     #
     
     # Debug
@@ -145,9 +163,19 @@ class connection_handler:
     #Public methods
     async def handle_client(self, reader, writer): # Main routine to handle an incoming connection
         # Initialize client
-        my_id = await self._initialize_client(reader, writer)
+        if debug: print("Client init...")
+        while True:
+            my_id = await self._initialize_client(reader, writer)
+            if my_id != -1:
+                break
+            await asyncio.sleep(0.1)
+        
+        if debug: print("Init success!")
 
         # Main loop for reading sensors from client
+        writer.write("start".encode())
+        await writer.drain()
+        if debug: print("Started")
         while True:
             if await self._read_from_client(self._clients["client_" + str(my_id)]) == ClientReturnCodes.CLIENT_DISCONNECTED:
                 self._dropped_clients.append(my_id)

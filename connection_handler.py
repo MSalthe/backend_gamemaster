@@ -1,5 +1,9 @@
 # Do not touch any of this if you don't /have/ to!
 
+# Todo: 
+    # clean up error handling
+    # clean up handshake  
+
 import asyncio
 import random
 import json

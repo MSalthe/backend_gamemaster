@@ -13,6 +13,13 @@ from enum import Enum
 debug = True # Set to True to enable debug messages
 session_id = random.randint(0, 10000) # Random session ID. Used so that clients don't keep their ID across sessions. Oops has a chance of 1/10000 to fail
 
+def format_command_message(command, flag, value): # Format: JSON
+    return json.dumps({
+        "command": command,
+        "flag": flag,
+        "value": value
+    })
+
 class ClientReturnCodes(Enum):
     READ_WRITE_SUCCESS = 0
     CLIENT_DISCONNECTED = 1
@@ -86,43 +93,43 @@ class connection_handler:
         self._clients["client_" + str(my_id)] = ClientData(my_id, reader, writer)
         print(f"New client added: {writer.get_extra_info('peername')}")
         
-        writer.write(("set_id " + str(my_id)).encode())
+        writer.write(("{\"command\": \"set_id\", \"value\":" + str(my_id) + "}").encode())
         await writer.drain()
 
         await asyncio.sleep(0.1)
 
-        writer.write(("set_session_id " + str(session_id)).encode())
+        writer.write(("{\"command\": \"set_session_id\", \"value\":" + str(session_id) + "}").encode())
         await writer.drain()
         
         return my_id
     
     async def _request_id(self, reader, writer):
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(1)
 
-        writer.write("request_id".encode())
+        writer.write("{\"command\": \"request_id\"}".encode())
         await writer.drain()
         data = await reader.read(32)
         message = data.decode()
         if debug: print(f"Received id reply: {message}")
         
-        # ID reply: "new_id" or "session_id, client_id"
-        if message.strip() == "new_id":
+        # ID reply: "session_id, client_id"
+        if message.strip() == "-1,-1": # New client
             return message
         else:
             try:
-                session_id_reply, client_id_reply = message.split(", ")
+                session_id_reply, client_id_reply = message.split(",")
             except:
-                print("Invalid reply during handshake: " + message)
+                print("Invalid reply during request_id: " + message)
                 return "invalid_reply"
             
             try:
                 if int(session_id_reply) != session_id:
                     print("Session ID mismatch. Assigning new ID.")
-                    print(f"Session ID: {session_id}, Received session ID: {session_id_reply}")
-                    return "new_id"
+                    print(f"(Session ID: {session_id}, Received session ID: {session_id_reply})")
+                    return "-1,-1"
             except:
                 print("Invalid session ID reply: " + session_id_reply)
-                return "new_id"
+                return "invalid_reply"
 
         return int(client_id_reply)
 
@@ -133,13 +140,13 @@ class connection_handler:
         id_reply = await self._request_id(reader, writer)
         if debug: print(f"ID reply: {id_reply}")
 
-        if id_reply.strip() == "new_id": # New client
+        if id_reply == "-1,-1": # New client
             if debug: print("New client detected.")
             my_id = await self._create_client(reader, writer) # Also sends ID to client
             if await self._request_id(reader, writer) == my_id:
                 return my_id
             
-        else:                            # Reconnecting client
+        else:                   # Reconnecting client
             try:
                 if int(id_reply) in self._dropped_clients:
                     my_id = int(id_reply)
@@ -150,7 +157,7 @@ class connection_handler:
                 else:
                     print("Client ID not found. Assigning new ID.")
                     my_id = await self._create_client(reader, writer)
-                    if self._request_id(reader, writer) == my_id:
+                    if await self._request_id(reader, writer) == my_id:
                         return my_id
             except:
                 print("Invalid reply during handshake: " + id_reply)

@@ -4,20 +4,28 @@ import random
 import connection_handler as connection_handler_
 
 # Replace hostname and port if needed
-IP = 'localhost'
-PORT = 5001
+IP = '192.168.194.206'
+PORT = 5050
 
 async def main():
 
     # Client server initialization
     client_handler = connection_handler_.connection_handler() # This is mad ugly, consider renaming file
-    server = await asyncio.start_server(client_handler.handle_client, IP, PORT)  
+    try:
+        server = await asyncio.start_server(client_handler.handle_client, IP, PORT)  
+    except Exception as e:
+        print(f'Failed to start server: {e}')
+        return
     print(f'Serving on {server.sockets[0].getsockname()}')
 
     # I am not sure whether this blocks further async execution. If it does, you might have to run this as a separate thread.
     async with server:
         await server.serve_forever()
 
+    await asyncio.gather(
+        client_handler.command_simulator()
+    )
+    
     # Start Game Master here. 
     # Only global variables and a main routine! Don't put any other code here pls. Keep main() clean.
     # Run it as an asyncio task so that it runs concurrently with the client handler.

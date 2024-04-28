@@ -4,7 +4,7 @@ import random
 import connection_handler as connection_handler_
 
 # Replace hostname and port if needed
-IP = '192.168.194.206'
+IP = '192.168.123.206'
 PORT = 5050
 
 async def main():

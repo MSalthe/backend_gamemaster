@@ -13,7 +13,7 @@ from enum import Enum
 debug = True # Set to True to enable debug messages
 session_id = random.randint(0, 10000) # Random session ID. Used so that clients don't keep their ID across sessions. Oops has a chance of 1/10000 to fail
 
-def format_command_message(command, flag, value): # Format: JSON
+def format_command_message(command, flag = -1, value = -1): # Format: JSON
     return json.dumps({
         "command": command,
         "flag": flag,
@@ -77,7 +77,7 @@ class connection_handler:
     async def _save_data(self, my_id, message): # Saves to client object, NOT database!
         try:
             message_json = json.loads(message)
-            for key in message_json:
+            for key in message_json: # Todo add another for loop in case of multiple transmissions in buffer
                 if debug: print(f"Key: {key}, Value: {message_json[key]}")
                 self._clients["client_" + str(my_id)].readings[key].append(message_json[key])
             return ClientReturnCodes.READ_WRITE_SUCCESS
@@ -101,50 +101,56 @@ class connection_handler:
         writer.write(("{\"command\": \"set_session_id\", \"value\":" + str(session_id) + "}").encode())
         await writer.drain()
         
+        print("_create_client: Returning my_id " + str(my_id))
         return my_id
     
     async def _request_id(self, reader, writer):
-        await asyncio.sleep(1)
 
+        print("Requesting ID.")
         writer.write("{\"command\": \"request_id\"}".encode())
         await writer.drain()
-        data = await reader.read(32)
+
+        await asyncio.sleep(0.5)
+
+        data = await reader.read(1024)
         message = data.decode()
         if debug: print(f"Received id reply: {message}")
         
         # ID reply: "session_id, client_id"
-        if message.strip() == "-1,-1": # New client
-            return message
-        else:
-            try:
-                session_id_reply, client_id_reply = message.split(",")
-            except:
-                print("Invalid reply during request_id: " + message)
-                return "invalid_reply"
-            
-            try:
-                if int(session_id_reply) != session_id:
-                    print("Session ID mismatch. Assigning new ID.")
-                    print(f"(Session ID: {session_id}, Received session ID: {session_id_reply})")
-                    return "-1,-1"
-            except:
-                print("Invalid session ID reply: " + session_id_reply)
-                return "invalid_reply"
+        try:
+            session_id_reply, client_id_reply = message.split(",")
+        except:
+            print("Invalid reply during request_id: " + message)
+            return "invalid_reply"
+        
+        try:
+            if int(session_id_reply) != session_id:
+                print("Session ID mismatch. Assigning new ID.")
+                print(f"(Session ID: {session_id}, Received session ID: {session_id_reply})")
+                return "-1,-1"
+        except:
+            print("Invalid session ID reply: " + session_id_reply)
+            return "invalid_reply"
 
         return int(client_id_reply)
 
     async def _initialize_client(self, reader, writer): # Initialization routine: handshake and create client object
         my_id = -1 # Default value, should be easy to catch if something goes wrong
 
-        #asyncio.sleep(1) # Wait for client to initialize.
+        await asyncio.sleep(0.5)
+
         id_reply = await self._request_id(reader, writer)
         if debug: print(f"ID reply: {id_reply}")
 
         if id_reply == "-1,-1": # New client
-            if debug: print("New client detected.")
+            if debug: print("_initialize_client: New client detected.")
             my_id = await self._create_client(reader, writer) # Also sends ID to client
-            if await self._request_id(reader, writer) == my_id:
-                return my_id
+
+            for i in range(3):
+                await asyncio.sleep(0.5)
+                my_id_reply = await self._request_id(reader, writer)
+                if my_id_reply == my_id:
+                    return my_id
             
         else:                   # Reconnecting client
             try:
@@ -177,6 +183,7 @@ class connection_handler:
         if debug: print("Client init...")
         while True:
             my_id = await self._initialize_client(reader, writer)
+            print("--- MY ID: " + str(my_id))
             if my_id != -1:
                 break
             await asyncio.sleep(0.1)
@@ -184,7 +191,7 @@ class connection_handler:
         if debug: print("Init success!")
 
         # Main loop for reading sensors from client
-        writer.write("start".encode())
+        writer.write(format_command_message(command = "start").encode())
         await writer.drain()
         if debug: print("Started")
         while True:
